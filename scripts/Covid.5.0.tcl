@@ -159,8 +159,8 @@ bind pub Z `deauth pub_deauth
 bind pub Z `logo pub_logo
 bind pub Z `k pub_kick
 bind pub Z `kb pub_kban
-bind pub Z `b pub_ban
-bind pub Z `ub pub_unban
+bind pub Z `+b pub_ban
+bind pub Z `-b pub_unban
 bind pub Z `mub pub_munban
 bind pub Z `join pub_join
 bind pub Z `part pub_part
@@ -181,12 +181,12 @@ bind pub Z `-guard pub_minguard
 bind pub Z `+badword pub_plusbadword
 bind pub Z `-badword pub_minusbadword
 bind pub Z `status pub_status
-bind pub Z `v pub_pois
+bind pub Z `+v pub_pois
 bind pub Z `mv pub_mpois
-bind pub Z `dv pub_depois
+bind pub Z `-v pub_depois
 bind pub Z `mdv pub_mdepois
-bind pub Z `o pub_opers
-bind pub Z `do pub_dopers
+bind pub Z `+o pub_opers
+bind pub Z `-o pub_dopers
 bind pub Z `deluser pub_deluser
 bind pub Z `userlist pub_userlist
 bind pubm Z * pub_botcmd
