@@ -4,11 +4,9 @@
 ## VERSION      : 5.0                                                       ##
 ## AUTHOR       : IJOO A.K.A VICTOR                                         ##
 ##                                                                          ##
-## This is a Protection Scripts                                             ##
-## Just basic control to your eggdrop..                                     ##
-## Working and Tested on irc.dal.net & irc.evochat.id                       ##
-##                                                                          ##
 ## RUN YOUR EGGDROP                                                         ##
+## /MSG BOT hello                                                           ##
+## /MSG BOT pass <password>   auth yourself to bot (need chattr n first)    ##
 ## /MSG BOT auth <password>   auth yourself to bot (need chattr n first)    ##
 ## /MSG BOT deauth            logout from bot                               ##
 ## /MSG BOT help              See Help CMD                                  ##
@@ -119,7 +117,6 @@ proc cvd_apply_defaults {chan} {
 	global global-flood-join global-flood-ctcp global-flood-nick global-aop-delay
 	global global-idle-kick global-stopnethack-mode global-revenge-mode
 	global global-ban-time global-exempt-time global-invite-time global-chanset
-
 	catch {channel set $chan chanmode ${global-chanmode}}
 	catch {channel set $chan flood-chan ${global-flood-chan}}
 	catch {channel set $chan flood-deop ${global-flood-deop}}
@@ -194,21 +191,12 @@ bind pub Z `userlist pub_userlist
 bind pubm Z * pub_botcmd
 bind pubm - * cvd_badwordcheck
 bind notc - "*Password accepted*" autoident2
-# Services word their "you have to identify" notices differently from network
-# to network ("This nickname is registered and has protection enabled",
-# "You must identify", ...). The single old pattern missed all of the common
-# ones, so the bot never identified, services changed its nick to Guest####
-# and no ChanServ op was ever granted. Patterns are matched case
-# insensitively by Eggdrop, so only the wording matters here.
 bind notc - "*This nickname is registered*" autoident
 bind notc - "*This nick is owned by someone else*" autoident
 bind notc - "*You must identify*" autoident
 bind notc - "*has protection enabled*" autoident
 bind notc - "*Nickname is protected*" autoident
 bind ctcp - "VERSION" autoversion
-# CTCP replies arrive either in a PRIVMSG (what normal clients send) or in a
-# NOTICE (older clients). A ctcr bind only ever sees the NOTICE form, so the
-# ping reply handler has to be bound to both or "`ping" looks broken.
 bind ctcp - "PING" pingreply
 bind ctcr - PING pingreply
 bind evnt - init-server evnt:init_server
@@ -261,9 +249,6 @@ proc autoident {nick uhost hand text dest} {
 		putlog "!cVd! $network needs an identify but no nickpass is set - skipping"
 		return 0
 	}
-	# Several of the bind patterns can match the same services burst, and
-	# every extra IDENTIFY with a wrong password gets the bot killed, so only
-	# one attempt is made per connection (reset in evnt:init_server).
 	if {[info exists cvd_ident_sent]} {return 0}
 	set cvd_ident_sent 1
 	set target [cvd_netget $network svc "NickServ"]
@@ -301,20 +286,12 @@ proc msg_cv {nick uhost hand rest} {
 
 proc msg_auth {nick uhost hand rest} {
 	global botnick notic tolak tuan
-	# Everything below works on the Eggdrop handle, not on the nick: the two
-	# are not always the same string (services/ident changes, +n users with a
-	# different nick, ...). Using $nick here made auth and the flag granting
-	# silently fail for exactly those users.
 	if {$hand == "" || ![matchattr $hand n]} {putquick "NOTICE $nick :$notic $tolak";return 0}
 	if {[matchattr $hand Z]} {putquick "NOTICE $nick :$notic [katakata "already auth with access"]: $tuan";return 0}
 	set inputpw [lindex $rest 0]
 	if {$inputpw == ""} {putquick "NOTICE $nick :$notic Command: /msg $botnick auth <password>";return 0}
 	set checkpw [passwdok $hand $inputpw]
 	if {$checkpw == 1} {
-		# The host list is left alone on purpose: Eggdrop already matched
-		# this handle against the host the user is on right now. Appending
-		# "<nick>!*@*" would hand owner powers to whoever grabs that nick
-		# later on.
 		chattr $hand +fZHQ
 		putquick "PRIVMSG $nick :$notic [katakata "access"] $tuan"
 		save
@@ -359,13 +336,6 @@ proc msg_nick {nick uhost hand rest} {
 	set pas [lindex $rest 1]
 	if {$nik == "" || $pas == ""} {putquick "PRIVMSG $nick :$notic Command: \002nick\002 <nick> <pass>";return 0}
 	if {[regexp {\s} $nik]} {putquick "PRIVMSG $nick :$notic [katakata "invalid nickname"]";return 0}
-	# NICK on the wire only ever takes the new nickname - there's no
-	# password field in that command. $pas is the bot's own NickServ
-	# password to remember for future identifies (see autoident), not
-	# something the NICK command itself understands.
-	# NOTE: nickpass lives in the running interpreter only - "save" writes
-	# the user/channel file, not eggdrop.conf, so a real restart drops it
-	# again unless the value is also edited in the config file.
 	set nickpass $pas
 	putserv "NICK $nik"
 	putquick "PRIVMSG $nick :$notic [katakata "botnick change to"] $nik"
@@ -375,8 +345,6 @@ proc msg_realname {nick uhost hand rest} {
 	global botnick realname notic notim
 	if {$rest == ""} {putquick "PRIVMSG $nick :$notic Command: \002realname\002 <realname>";return 0}
 	if {[string length $rest] > 60} {putquick "PRIVMSG $nick :$notic [katakata "too long"] (max 60)";return 0}
-	# Runtime only, see the note in msg_nick: this is lost on restart unless
-	# it is also changed in eggdrop.conf.
 	set realname $rest
 	putserv "QUIT :$notic [katakata "rEALNaME CHaNGED By"] \[ $nick \]"
 }
@@ -402,10 +370,6 @@ proc msg_restart {nick uhost hand rest} {
 	set alasan "[katakata "[lrange $rest 0 end]"]"
 	if {$alasan == ""} {set alasan "[katakata "restart request by"] \0030,4 $nick \003"}
 	putquick "PRIVMSG $nick :$notim [katakata "restart now"]!"
-	# "restart" is a real Eggdrop command: it rehashes, kills the timers,
-	# reloads the modules and reconnects. A plain QUIT (what this used to
-	# do) only makes the bot reconnect - the process, its timers and all
-	# script state stayed exactly as they were.
 	utimer 1 [list putserv "QUIT :[lgrnd] $alasan"]
 	utimer 5 restart
 }
@@ -499,9 +463,6 @@ proc msg_cvdset {nick host hand rest} {
 	puthelp "PRIVMSG $nick :$notic $cat $opt [katakata "set to"] $val"
 }
 
-# Splits a badword argument list on whitespace but keeps "quoted phrases"
-# together, so a multi word entry like "buy now" can actually be stored
-# (plain [split] turned every phrase into separate single words).
 proc cvd_parse_words {text} {
 	set out {} ; set cur "" ; set inq 0
 	foreach ch [split $text ""] {
@@ -674,10 +635,6 @@ proc pub_deauth {nick uhost hand chan rest} {
 	}
 }
 
-# Turns whatever the operator typed (a nick or an existing handle) into an
-# Eggdrop handle. The two are not always the same string, and every command
-# that takes a user argument (adduser/chattr/passwdok/deluser/matchattr) needs
-# the handle.
 proc cvd_gethand {nick chan} {
 	if {$nick == ""} {return ""}
 	if {[validuser $nick]} {return $nick}
@@ -688,9 +645,6 @@ proc cvd_gethand {nick chan} {
 	return $nick
 }
 
-# Friend/autovoice lists are only useful for people the bot can recognise
-# later, so a nick that is neither a known handle nor currently in a channel
-# is rejected instead of creating a junk user record for it.
 proc cvd_known_user {chan target} {
 	if {$target == ""} {return 0}
 	if {[validuser $target]} {return 1}
@@ -699,8 +653,6 @@ proc cvd_known_user {chan target} {
 	return 0
 }
 
-# Single place for the "bot has no op here" answer. The mode commands used to
-# return silently, which made a working command look like it had hung.
 proc cvd_notop {nick chan} {
 	global notic
 	putquick "NOTICE $nick :$notic [katakata "im not operator"] $chan"
@@ -710,10 +662,6 @@ proc cvd_notop {nick chan} {
 proc pub_plusteman {nick uhost hand chan rest} {
 	global botnick notic tolak
 	if {$rest == ""} {putquick "NOTICE $nick :$notic Command: `+f <nick>";return 0}
-	# Only the first word is ever the actual target - using the whole
-	# $rest (which could carry trailing garbage if someone types extra
-	# text after the nick) straight into adduser/chattr would create a
-	# bogus multi-word handle instead of failing cleanly.
 	set target [cvd_gethand [lindex $rest 0] $chan]
 	if {![cvd_known_user $chan $target]} {
 		putquick "NOTICE $nick :$notic $target - [katakata "not a known user and not in"] $chan"
@@ -721,9 +669,6 @@ proc pub_plusteman {nick uhost hand chan rest} {
 	}
 	if {[matchattr $target f]} {putquick "NOTICE $nick :$notic \002$target\002 [katakata "already on friend list"]";return 0}
 	if {![validuser $target]} {adduser $target "${target}!*@*"}
-	# Only the friend flag is touched here. This used to run
-	# "chattr $target -hp" first, which silently stripped the partyline
-	# (+p) and highlight (+h) flags of an already existing handle.
 	chattr $target "f" ; save
 	puthelp "NOTICE $nick :$notic \002$target\002 [katakata "is successfully \037added\037 to friend list"]!"
 }
@@ -773,9 +718,6 @@ proc pub_join {nick uhost hand chan rest} {
 
 proc pub_deluser {nick uhost hand chan rest} {
 	global botnick notic tolak owner
-	# deluser only knows handles, so a nickname has to be resolved first -
-	# otherwise the operator gets "not available" for a user that is right
-	# there in the channel under a different handle.
 	set targetx [cvd_gethand [lindex $rest 0] $chan]
 	set okdel "0"
 	if {$targetx == ""} {putquick "NOTICE $nick :$notic [katakata "invalid handle"]!";return 0}
@@ -805,7 +747,6 @@ proc pub_part {nick uhost hand chan rest} {
 proc pub_info {nick uhost hand chan rest} {
 	global botnick notim tolak version tcl_version pidfile verc ircv3caps
 	set myos "unknown"
-	# exec in list form, no "eval" and no shell pipeline here.
 	if {![catch {exec grep PRETTY /etc/os-release} outputx]} {
 		set myos [string map {"PRETTY_NAME=" ""} [string trim $outputx]]
 	}
@@ -813,9 +754,6 @@ proc pub_info {nick uhost hand chan rest} {
 	if {![catch {set backid [open $pidfile r]; gets $backid pidnya; close $backid}]} {
 		set pidnya [string trim $pidnya]
 	}
-	# Look our own line up by pid instead of "ps axu | grep $pidnya | head -1",
-	# which also matched the grep itself and any other process that happened
-	# to have the pid in its arguments.
 	set cpux "?" ; set memx "?"
 	if {$pidnya ne "?"} {
 		if {![catch {set outcpu [exec ps axo pid=,%cpu=,%mem=]}]} {
@@ -879,8 +817,6 @@ proc pub_kban {nick uhost hand chan rest} {
 	set handle [lindex $rest 0]
 	set reason [lrange $rest 1 end]
 	if {![isop $botnick $chan]} {puthelp "NOTICE $nick :$notic [katakata "im not operator"]";return 0}
-	# Without this check getchanhost returns an empty string and the bot
-	# would happily set a ban on the nonsense mask "*!*@".
 	if {![onchan $handle $chan]} {puthelp "NOTICE $nick :$notic $handle [katakata "is not in"] $chan";return 0}
 	if {[isop $handle $chan]} {puthelp "NOTICE $nick :$notic [katakata "cannot kickban other operator"]";return 0}
 	if {[matchattr $handle Z]} {puthelp "NOTICE $nick :$notic [katakata "cannot kickban my owner"]";return 0}
@@ -899,7 +835,6 @@ proc pub_ban {nick uhost hand chan rest} {
 	if {$rest == ""} {puthelp "NOTICE $nick :$notic Usage: `b <nick>";return 0}
 	set handle [lindex $rest 0]
 	if {![isop $botnick $chan]} {puthelp "NOTICE $nick :$notic [katakata "im not operator"]";return 0}
-	# Same guard as pub_kban: no on-channel host means no usable ban mask.
 	if {![onchan $handle $chan]} {puthelp "NOTICE $nick :$notic $handle [katakata "is not in"] $chan";return 0}
 	if {[isop $handle $chan]} {puthelp "NOTICE $nick :$notic [katakata "cannot banned other operator"]";return 0}
 	if {[matchattr $handle Z]} {puthelp "NOTICE $nick :$notic [katakata "cannot banned my owner"]";return 0}
@@ -919,11 +854,6 @@ proc pub_unban {nick uhost hand chan rest} {
 	if {[string first # $chan] != 0} {set chan "#$chan"}
 	if {![validchan $chan]} {putquick "NOTICE $nick :$notic [katakata "im not on that channel"]!";return 0}
 	set handle [lindex $rest 0]
-	# Bans created by this script (pub_ban/pub_kban) always use the plain
-	# "*!*@host" form. The old code ran the typed nick through
-	# "<nick>!*<ident>@<host>" + "maskhost", which expands to
-	# "*!**user@*.host" - a different mask, so the server rejected the
-	# -b and the ban stayed up. Use the exact same shape here.
 	set hostmask $handle
 	if {[onchan $handle $chan]} {
 		set chanhost [getchanhost $handle $chan]
@@ -959,8 +889,6 @@ proc pub_munban {nick uhost hand chan rest} {
 			set i 0
 		}
 	}
-	# Only flush what is actually left over: an empty "-bbbbb" is a
-	# not-enough-parameters error from the server.
 	if {$bans != ""} {putserv "MODE $chan -bbbbb $bans"}
 	if {![onchan $nick $chan]} { 
 		putquick "NOTICE $nick :$notic MuNBaNS \[$chan\]"
@@ -976,10 +904,6 @@ proc pub_pois {nick uhost hand chan rest} {
 		return 0
 	}
 	if {$rest != ""} {
-		# MODE requires exactly as many mode-letters as parameters - a
-		# fixed "+vvvvvv" only ever worked by luck when $rest happened to
-		# have exactly 6 nicks; size it to what's actually there instead
-		# (capped at 6, same batch size the mass commands use).
 		set targets [lrange $rest 0 5]
 		putserv "MODE $chan +[string repeat v [llength $targets]] $targets"
 	} else {
@@ -1085,10 +1009,6 @@ proc pub_dopers {nick uhost hand chan rest} {
 		putquick "NOTICE $nick :$notic Usage: `do <nick>"
 		return 0
 	}
-	# Plain "-o" only. The old code did the opposite of what it looks like:
-	# on a channel WITHOUT a key it sent "-ko <text> <nicks>", i.e. it tried
-	# to remove a key that isn't there using "request.by.owner" as the key
-	# value, and on a keyed channel it sent the correct plain deop.
 	if {$rest != ""} {
 		set targets [lrange $rest 0 5]
 		set oflags [string repeat o [llength $targets]]
@@ -1189,9 +1109,6 @@ proc pub_minusbadword {nick uhost hand chan rest} {
 }
 
 proc cvd_guard_on {chan} {
-	# A name that cannot be a channel is "not guarded", same as the badword
-	# check below. Returning 1 here made every guard-gated code path treat an
-	# empty/garbage channel as a protected one.
 	if {$chan == "" || [string index $chan 0] != "#"} {return 0}
 	foreach i [channel info $chan] {
 		if {[string match "+guard" $i]} {return 1}
@@ -1235,12 +1152,6 @@ proc cvd_guard_ensure_op {chan} {
 
 	set cvd_guard_pending($chan) 1
 	putlog "!cVd! +guard aktif di $chan tapi saya belum op - mencoba dapatkan op"
-	# The op request is network specific (ChanServ, X?Chan, a botnet mate,
-	# ...), so it is configurable. %c% and %n% are replaced with the channel
-	# and the botnick. Default stays ChanServ.
-	# string map does not evaluate variables inside the map list, so build
-	# the pairs with "list" - otherwise the request went out with a literal
-	# "$chan" in it.
 	set req [string map [list %c% $chan %n% $botnick] ${cvd-guard-opcmd}]
 	catch {putserv $req}
 	putlog "!cVd! op request dikirim: $req"
@@ -1381,16 +1292,9 @@ proc cvd_kick {nick uhost hand chan target reason} {
 	utimer ${cvd-rejoin-delay} [list putserv "JOIN $chan"]
 }
 
-# Returns the pattern that matched (or ""), so the caller can act on it once.
-# Patterns that contain a space are matched against the whole line, single
-# words are matched against each whitespace separated token - that way
-# "buy now" blocks a phrase and "spam*" still blocks the usual noise.
 proc cvd_badword_hit {rest} {
 	global cvd_badwords
 	set lowered [string tolower [string trim $rest]]
-	# Patterns containing a space are matched against the line, either as a
-	# plain substring or - when the pattern holds wildcards - against every
-	# word window of the same length ("buy * now" and friends).
 	foreach pat $cvd_badwords {
 		if {[string first " " [string trim $pat]] == -1} {continue}
 		if {[regexp {[*?\[\]\\]} $pat]} {
@@ -1406,8 +1310,6 @@ proc cvd_badword_hit {rest} {
 			return $pat
 		}
 	}
-	# Single word patterns are matched against each token, with and without
-	# the surrounding punctuation that got trimmed off.
 	foreach word [split $rest] {
 		set token [string trim $word " \t,.!?;:'\"()\[\]<>"]
 		if {$token == ""} {continue}
@@ -1421,16 +1323,11 @@ proc cvd_badword_hit {rest} {
 
 proc cvd_badwordcheck {nick uhost hand chan rest} {
 	global botnick notic cvd_badwords
-
 	if {![cvd_badword_on $chan]} {return 0}
 	if {$nick == $botnick} {return 0}
 	if {![llength $cvd_badwords]} {return 0}
 	set pat [cvd_badword_hit $rest]
 	if {$pat == ""} {return 0}
-	# Only check owner/friend exemption once a word actually matched -
-	# checking it up-front would mean logging (or even just spending matchattr
-	# calls) on every single line an owner/friend types, not just the rare
-	# one that trips the filter.
 	if {[matchattr $hand Z] || [matchattr $hand f]} {
 		putlog "!cVd! BadWoRD \"$pat\" from $nick diabaikan - dia owner/friend"
 		return 0
@@ -1486,9 +1383,6 @@ proc cvd_joinburst {nick uhost hand chan} {
 	global cvd-automod-max cvd-automod-window cvd-automod-duration
 
 	if {$nick == $botnick} {
-		# We just joined (or rejoined) this channel - if it already has
-		# +guard on from a previous session/rehash, make sure we actually
-		# get op, or the protection is pointless.
 		cvd_guard_ensure_op $chan
 		return 0
 	}
@@ -1577,15 +1471,15 @@ proc pub_botcmd {nick uhost hand chan rest} {
 			cycle  { pub_cycle $nick $uhost $hand $chan "" }
 			ver  { pub_info $nick $uhost $hand $chan "" }
 			+v { pub_pois $nick $uhost $hand $chan $botcmd }
-			dv -v { pub_depois $nick $uhost $hand $chan $botcmd }
+			-v { pub_depois $nick $uhost $hand $chan $botcmd }
 			+o { pub_opers $nick $uhost $hand $chan $botcmd }
-			do -o { pub_dopers $nick $uhost $hand $chan $botcmd }
+			-o { pub_dopers $nick $uhost $hand $chan $botcmd }
 			mv { pub_mpois $nick $uhost $hand $chan $botcmd }
 			mdv { pub_mdepois $nick $uhost $hand $chan $botcmd }
 			k { pub_kick $nick $uhost $hand $chan $botcmd }
 			kb { pub_kban $nick $uhost $hand $chan $botcmd }
-			b +b { pub_ban $nick $uhost $hand $chan $botcmd }
-			-b ub { pub_unban $nick $uhost $hand $chan $botcmd }
+			+b { pub_ban $nick $uhost $hand $chan $botcmd }
+			-b { pub_unban $nick $uhost $hand $chan $botcmd }
 			mub { pub_munban $nick $uhost $hand $chan $botcmd }
 			+greet { pub_plusgreet $nick $uhost $hand $chan "" }
 			-greet { pub_mingreet $nick $uhost $hand $chan "" }
@@ -1609,7 +1503,6 @@ proc pub_ping {nick host hand chan rest} {
 proc pingreply {nick host hand dest key arg} {
 	global server notic
 	set pingnum [lindex $arg 0]
-	# Returning 1 keeps Eggdrop from logging/answering the CTCP itself.
 	if {$pingnum == "" || [regexp -- {[^0-9]} $pingnum]} {return 1}
 	set pingserver [lindex [split $server :] 0]
 	set balas [expr {([clock clicks -milliseconds] - $pingnum) / 1000.0}]
@@ -1619,7 +1512,6 @@ proc pingreply {nick host hand dest key arg} {
 
 proc evnt:init_server {type} {
 	global botnick network ircv3caps cvd_ident_sent
-	# Fresh connection: allow exactly one services identify attempt again.
 	catch {unset cvd_ident_sent}
 	putquick "MODE $botnick +xiB-ws"
 	set ignsvc [cvd_netget $network ignsvc ""]
